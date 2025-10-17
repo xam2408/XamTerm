@@ -1,4 +1,4 @@
-#define _GNU_SOURCE      // potrzebne w niektórych systemach
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,19 +6,50 @@
 #include <unistd.h>
 #include <linux/limits.h>
 
-//embedded functions
+int swdir(char **args);
+int chngdir(char **arg);
+int shell_exit(char **args);
 
-void swdir() { //show working directory
+typedef struct default_commands {
+    char *command;
+    int (*com)(char **arg);
+} default_commands_t;
+
+default_commands_t coms[] = {
+    { "swdir", &swdir },
+    { "chdir", &chngdir },
+    { "exit", &shell_exit }
+};
+
+int num_coms() {
+    return sizeof(coms) / sizeof(default_commands_t);
+}
+
+int swdir(char **args) {
     char dir_[PATH_MAX];
     if (getcwd(dir_, sizeof(dir_)) != NULL) {
         printf("%s\n", dir_);
     } else {
         perror("XamShell");
     }
+    return 1;
 }
 
+int chngdir(char **arg) {
+    if (arg[1] == NULL) {
+        fprintf(stderr, "No directory provided !!!\n");
+    } else {
+        if (chdir(arg[1]) != 0) {
+            fprintf(stderr, "Changing directory failed !!!\n");
+        }
+    }
+    return 1;
+}
 
-//handler for signal (ctrl+c)
+int shell_exit(char **args) {
+    return 0;
+}
+
 void handle_sigint(int sig) {
     printf("\n");
     printf("XamShell $ > ");
@@ -30,34 +61,28 @@ int main(void) {
     char *args[64];
     char *token;
     char usr = '$';
-    //char super_usr = '#';
-
     size_t len = 0;
     ssize_t nread;
+    int status = 1;
 
-    // Ustaw handler dla Ctrl+C
     signal(SIGINT, handle_sigint);
 
-    while (1) {
+    do {
         printf("XamShell %c > ", usr);
         fflush(stdout);
 
         nread = getline(&line, &len, stdin);
         if (nread == -1) {
-            printf("\nExiting XamShell.\n");
+            printf("\n");
             break;
         }
 
-        line[strcspn(line, "\n")] = '\0'; //remove last endline char to get exit working
+        line[strcspn(line, "\n")] = '\0';
 
         int i = 0;
         token = strtok(line, " \t\r\n\a");
-        while (token != NULL) {
-            args[i] = token;
-            i++;
-            if (i >= sizeof(args) / sizeof(char*)) {
-                break;
-            }
+        while (token != NULL && i < (sizeof(args) / sizeof(char*) - 1)) {
+            args[i++] = token;
             token = strtok(NULL, " \t\r\n\a");
         }
         args[i] = NULL;
@@ -66,18 +91,22 @@ int main(void) {
             continue;
         }
 
-        if (strncmp(args[0], "exit", sizeof("exit")) == 0) {
-            printf("Exiting XamShell.\n");
-            break;
-        } 
-        else if (strncmp(args[0], "swdir", sizeof("swdir")) == 0) {
-            swdir();
+        int command_found = 0;
+        for (i = 0; i < num_coms(); i++) {
+            if (strcmp(args[0], coms[i].command) == 0) {
+                status = coms[i].com(args);
+                command_found = 1;
+                break;
+            }
         }
-        else {
+
+        if (!command_found) {
             printf("XamShell: command not found: %s\n", args[0]);
         }
-    }
 
-    free(line); // free getline alocated memory
+    } while (status);
+
+    free(line);
+    printf("Exiting XamShell.\n");
     return 0;
 }
